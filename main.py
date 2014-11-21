@@ -88,7 +88,7 @@ class GerritGitHubSyncBot(object):
 #        print(author)
         #cm_path = self.save_to_tmpfile(commit_msg)
         self.shell_exec(['git', 'commit', '-a', '-F', '-', '--author=%s' % author], input=commit_msg.encode())
-        pass
+        self.shell_exec(['git', 'push', 'gerrit', 'HEAD:refs/for/master'])  # TODO: Don't hardcode master
 
     def run(self):
         self.init()
