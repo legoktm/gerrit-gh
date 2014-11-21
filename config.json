@@ -1,0 +1,8 @@
+{
+    "mw.index": "https://www.mediawiki.org/w/index.php",
+    "mw.page": "User:Legoktm/test",
+    "git.repo_path": "~/repos",
+    "git.clone": "https://github.com/wikimedia/$1",
+    "gh.account": "wikimedia",
+    "db.location": "~/db.db"
+}
