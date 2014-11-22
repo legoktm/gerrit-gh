@@ -135,7 +135,7 @@ class GerritGitHubSyncBot(object):
         """
         if 'gh.password_file' in self.config:
             with open(os.path.expanduser(self.config['gh.password_file'])) as f:
-                self.config['gh.password'] = f.read()
+                self.config['gh.password'] = f.read().strip()
 
     def local_repo_path(self, name):
         return os.path.join(os.path.expanduser(self.config['git.repo_path']), name)
