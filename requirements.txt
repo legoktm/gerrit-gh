@@ -1,2 +1,2 @@
-requests==2.4.3
 sqlalchemy==0.9.8
+PyGithub==1.25.2

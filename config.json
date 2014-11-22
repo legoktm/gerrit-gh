@@ -3,6 +3,12 @@
     "mw.page": "User:Legoktm/test",
     "git.repo_path": "~/repos",
     "git.clone": "https://github.com/wikimedia/$1",
+    "gerrit.username": "github",
     "gh.account": "wikimedia",
-    "db.location": "~/db.db"
+    "gh.username": "gerritbot",
+    "db.location": "~/db.db",
+    "gh.password_file": "~/pwd",
+    "repos": [
+        "mediawiki-extensions-examples"
+    ]
 }

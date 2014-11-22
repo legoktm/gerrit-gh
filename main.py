@@ -7,9 +7,9 @@ import pprint
 import subprocess
 import tempfile
 
-import dbstore
 import github
-import mediawiki
+
+import dbstore
 
 
 class GerritGitHubSyncBot(object):
@@ -19,17 +19,20 @@ class GerritGitHubSyncBot(object):
         self._gh = None
         self._store = None
 
-    def process_pull_request(self, repo, info):
+    def process_pull_request(self, repo, pr):
+        """
+        :type pr: github.PullRequest.PullRequest
+        """
         cwd = os.getcwd()
         os.chdir(self.local_repo_path(repo))
-        patch_url = info['patch_url']
+        patch_url = pr.patch_url
         local_path = os.path.abspath(patch_url.split('/')[-1])
-        self.debug(info['title'])
-        self.debug(info['body'])
+        self.debug(pr.title)
+        self.debug(pr.body)
         if os.path.exists(local_path):
             self.debug('Removing %s' % local_path)
             os.unlink(local_path)
-        self.shell_exec(['wget', info['patch_url']])
+        self.shell_exec(['wget', pr.patch_url])
         with open(local_path) as f:
             content = f.read()
         md5 = hashlib.md5(content.encode()).hexdigest()
@@ -38,31 +41,26 @@ class GerritGitHubSyncBot(object):
             if row['hash'] == md5:
                 return
             else:
-                self.update_pull_req(repo, info, local_path, changeid=row['changeid'])
+                self.update_pull_req(repo, pr, local_path, md5, changeid=row['changeid'])
         else:
-            self.update_pull_req(repo, info, local_path)
+            self.update_pull_req(repo, pr, local_path, md5)
         #print(info['patch_url'])
         #pprint.pprint(info, indent=4)
-        self.debug(info['html_url'])
+        self.debug(pr.html_url)
         os.chdir(cwd)
         quit()
 
-    def save_to_tmpfile(self, msg):
-        fh, path = tempfile.mkstemp('.txt', prefix='msg', text=True)
-        fh.write(msg)
-        fh.close()
-        return path
-
-    def update_pull_req(self, repo, info, patchfile, changeid=None):
+    def update_pull_req(self, repo, pr, patchfile, md5, changeid=None):
         """
         Assumes that cwd is the repository
 
         :param repo: Repository name
         :type repo: str
-        :param info: dict of info returned by the API
-        :type info: dict
+        :param pr: dict of info returned by the API
+        :type pr: github.PullRequest.PullRequest
         :param patchfile: path to the patch file
         :type patchfile: str
+        :param md5: md5 hash of the patch file
         :param changeid: if there's already a gerrit change, the change-id of it
         """
         commits = self.shell_exec(['git', 'am', patchfile])
@@ -72,42 +70,50 @@ class GerritGitHubSyncBot(object):
         self.shell_exec(['git', 'reset', '--soft', 'HEAD~%s' % count])
         # Build a commit message!
         # First see if we can grab a Bug: footer, it has to be at the bottom
-        lines = info['body'].strip().splitlines()
+        body = pr.body
+        lines = body.strip().splitlines()
         bug = None
         if lines[-1].startswith('Bug: '):
             bug = lines[-1]
-            info['body'] = '\n'.join(lines[:-1])
+            body = '\n'.join(lines[:-1])
 
-        commit_msg = info['title'] + '\n'
-        commit_msg += info['body']
+        commit_msg = pr.title + '\n'
+        commit_msg += body
         commit_msg += '\n'
-        commit_msg += 'Closes ' + info['html_url'] + '\n'  # For GH's auto-close thingy
+        commit_msg += 'Closes ' + pr.html_url + '\n'  # For GH's auto-close thingy
         if bug:
             commit_msg += bug + '\n'
-        author = self.gh.get_author_string(info['user']['login'])
-#        print(author)
-        #cm_path = self.save_to_tmpfile(commit_msg)
+
+        if changeid:
+            commit_msg += 'Change-Id: ' + changeid + '\n'
+        author = '{name} <{email}>'.format(name=pr.user.name, email=pr.user.email)
         self.shell_exec(['git', 'commit', '-a', '-F', '-', '--author=%s' % author], input=commit_msg.encode())
+        # Write down the change-id if we created a new one...
+        if not changeid:
+            msg = self.shell_exec(['git', 'log', '-1'])
+            changeid = msg.splitlines()[-1].strip().split(':', 1)[1]
+            self.store.insert(pr.patch_url, changeid, repo, md5)
+
         self.shell_exec(['git', 'push', 'gerrit', 'HEAD:refs/for/master'])  # TODO: Don't hardcode master
+        comment = 'This pull request has been imported into Gerrit, our code review system.' \
+                  ' Discussion and review will take place at https://gerrit.wikimedia.org/r/#q,%s,n,z' % changeid
+        pr.create_issue_comment(comment)
 
     def run(self):
         self.init()
         for repo in self.config['repos']:
-            prs = self.gh.get_pull_requests(self.config['gh.account'], repo)
-            for pr in prs:
+            gh_repo = self.gh.get_repo('%s/%s' % (self.config['gh.account'], repo))
+            for pr in gh_repo.get_pulls(state='open'):
                 self.process_pull_request(repo, pr)
         pass
 
     @property
-    def mw(self):
-        if self._mw is None:
-            self._mw = mediawiki.MediaWiki(self.config['mw.index'])
-        return self._mw
-
-    @property
     def gh(self):
         if self._gh is None:
-            self._gh = github.Github('https://api.github.com')
+            self._gh = github.Github(
+                self.config['gh.username'],
+                self.config['gh.password']
+            )
         return self._gh
 
     @property
@@ -125,11 +131,11 @@ class GerritGitHubSyncBot(object):
 
     def init_config(self):
         """
-        Load on-wiki config
+        Load password
         """
-        on_wiki_config = self.mw.json_content(self.config['mw.page'])
-        on_wiki_config.update(self.config)
-        self.config = on_wiki_config
+        if 'gh.password_file' in self.config:
+            with open(os.path.expanduser(self.config['gh.password_file'])) as f:
+                self.config['gh.password'] = f.read()
 
     def local_repo_path(self, name):
         return os.path.join(os.path.expanduser(self.config['git.repo_path']), name)
@@ -157,7 +163,7 @@ class GerritGitHubSyncBot(object):
                 self.shell_exec(['git', 'clone', clone_url])
                 os.chdir(path)
                 self.shell_exec(['git', 'checkout', 'origin/master'])
-                self.shell_exec(['git', 'review', '-s'])
+                self.shell_exec(['git', 'review', '-s'], input=self.config['gerrit.username'].encode())
                 os.chdir(cwd)
             else:
                 os.chdir(path)
@@ -167,8 +173,9 @@ class GerritGitHubSyncBot(object):
                 os.chdir(cwd)
 
 
+with open('config.json') as f:
+    config = json.load(f)
+sync = GerritGitHubSyncBot(config)
+
 if __name__ == '__main__':
-    with open('config.json') as f:
-        config = json.load(f)
-    sync = GerritGitHubSyncBot(config)
     sync.run()
