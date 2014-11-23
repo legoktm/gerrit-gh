@@ -91,7 +91,7 @@ class GerritGitHubSyncBot(object):
         # Write down the change-id if we created a new one...
         if not changeid:
             msg = self.shell_exec(['git', 'log', '-1'])
-            changeid = msg.splitlines()[-1].strip().split(':', 1)[1]
+            changeid = msg.splitlines()[-1].strip().split(':', 1)[1].strip()
             self.store.insert(pr.patch_url, changeid, repo, md5)
 
         self.shell_exec(['git', 'push', 'gerrit', 'HEAD:refs/for/master'])  # TODO: Don't hardcode master
