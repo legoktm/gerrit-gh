@@ -73,7 +73,7 @@ class GerritGitHubSyncBot(object):
         body = pr.body
         lines = body.strip().splitlines()
         bug = None
-        if lines[-1].startswith('Bug: '):
+        if lines and lines[-1].startswith('Bug: '):
             bug = lines[-1]
             body = '\n'.join(lines[:-1])
 
